@@ -212,7 +212,8 @@ public class NextLevelPhotoConfiguration : NextLevelConfiguration {
     }
     
     // MARK: funcs
-        
+
+    @available(iOS 10, *)
     public func avcaptureDictionary() -> [String: Any]? {
         if let options = self.options {
             return options

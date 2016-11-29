@@ -90,7 +90,8 @@ public enum NextLevelDeviceType: Int, CustomStringConvertible {
     case wideAngleCamera
     case telephotoCamera
     case duoCamera
-    
+
+    @available(iOS 10, *)
     var avfoundationType: AVCaptureDeviceType {
         switch self {
         case .microphone:
@@ -641,8 +642,8 @@ public class NextLevel: NSObject {
     
     internal var _videoOutput: AVCaptureVideoDataOutput?
     internal var _audioOutput: AVCaptureAudioDataOutput?
-    internal var _photoOutput: AVCapturePhotoOutput?
-    
+    internal var _photoOutput: AVCaptureOutput?
+
     internal var _currentDevice: AVCaptureDevice?
     internal var _requestedDevice: AVCaptureDevice?
 
@@ -1101,22 +1102,25 @@ extension NextLevel {
     }
     
     private func addPhotoOutput() -> Bool {
-        
         if self._photoOutput == nil {
-            self._photoOutput = AVCapturePhotoOutput()
+            if #available(iOS 10, *) {
+                self._photoOutput = AVCapturePhotoOutput()
+            } else {
+                self._photoOutput = AVCaptureStillImageOutput()
+            }
         }
-        
+
         if let session = self._captureSession, let photoOutput = self._photoOutput {
             if session.canAddOutput(photoOutput) {
                 session.addOutput(photoOutput)
                 return true
             }
         }
+
         print("NextLevel, couldn't add audio output to session")
         return false
-        
     }
-    
+
     internal func removeOutputsIfNecessary(session: AVCaptureSession) {
         
         switch self.cameraMode {
@@ -1189,17 +1193,21 @@ extension NextLevel {
                 
                 do {
                     try device.lockForConfiguration()
-                    
+
                     if let output = self._photoOutput {
                         if self.photoConfiguration.flashMode != newValue.avfoundationType {
-                            let modes = output.supportedFlashModes
-                            let numberMode: NSNumber = NSNumber(integerLiteral: Int(newValue.avfoundationType.rawValue))
-                            if modes.contains(numberMode) {
+                            if #available(iOS 10, *), let output = output as? AVCapturePhotoOutput {
+                                let modes = output.supportedFlashModes
+                                let numberMode: NSNumber = NSNumber(integerLiteral: Int(newValue.avfoundationType.rawValue))
+                                if modes.contains(numberMode) {
+                                    self.photoConfiguration.flashMode = newValue.avfoundationType
+                                }
+                            } else if device.isFlashModeSupported(newValue.avfoundationType) {
                                 self.photoConfiguration.flashMode = newValue.avfoundationType
                             }
                         }
                     }
-                        
+
                     device.unlockForConfiguration()
                 }
                 catch {
@@ -1788,7 +1796,14 @@ extension NextLevel {
     }
     
     public func changeCaptureDeviceIfAvailable(captureDevice: NextLevelDeviceType) throws {
-        let deviceForUse = AVCaptureDevice.captureDevice(withType: captureDevice.avfoundationType, forPosition: .back)
+        let deviceForUse = { () -> AVCaptureDevice? in
+            if #available(iOS 10, *) {
+                return AVCaptureDevice.captureDevice(withType: captureDevice.avfoundationType, forPosition: .back)
+            } else {
+                return nil
+            }
+        }()
+
         if deviceForUse == nil {
             throw NextLevelError.deviceNotAvailable
         } else {
@@ -1817,13 +1832,13 @@ extension NextLevel {
                 videoConnection.videoOrientation = currentOrientation
             }
         }
-        
+
         if let photoOutput = self._photoOutput, let photoConnection = photoOutput.connection(withMediaType: AVMediaTypeVideo) {
             if photoConnection.isVideoOrientationSupported {
                 photoConnection.videoOrientation = currentOrientation
             }
         }
-        
+    
         self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: currentOrientation.deviceOrientationNextLevelType())
     }
     
@@ -1848,11 +1863,15 @@ extension NextLevel {
     
     public var supportsVideoCapture: Bool {
         get {
-            let deviceTypes: [AVCaptureDeviceType] = [.builtInWideAngleCamera, .builtInTelephotoCamera, .builtInDuoCamera]
-            if let discoverySession = AVCaptureDeviceDiscoverySession(deviceTypes: deviceTypes, mediaType: AVMediaTypeVideo, position: .unspecified) {
-                return discoverySession.devices.count > 0
+            if #available(iOS 10, *) {
+                let deviceTypes: [AVCaptureDeviceType] = [.builtInWideAngleCamera, .builtInTelephotoCamera, .builtInDuoCamera]
+                if let discoverySession = AVCaptureDeviceDiscoverySession(deviceTypes: deviceTypes, mediaType: AVMediaTypeVideo, position: .unspecified) {
+                    return discoverySession.devices.count > 0
+                } else {
+                    return false
+                }
             } else {
-                return false
+                return AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo).count > 0
             }
         }
     }
@@ -2001,14 +2020,83 @@ extension NextLevel {
     }
     
     public func capturePhoto() {
-        if let photoOutput = self._photoOutput, let _ = photoOutput.connection(withMediaType: AVMediaTypeVideo) {
-            if let formatDictionary = self.photoConfiguration.avcaptureDictionary() {
-                let photoSettings = AVCapturePhotoSettings(format: formatDictionary)
-                photoOutput.capturePhoto(with: photoSettings, delegate: self)
+        if #available(iOS 10, *), let photoOutput = self._photoOutput as? AVCapturePhotoOutput,
+            let formatDictionary = self.photoConfiguration.avcaptureDictionary(),
+            photoOutput.connection(withMediaType: AVMediaTypeVideo) != nil {
+
+            let photoSettings = AVCapturePhotoSettings(format: formatDictionary)
+            photoOutput.capturePhoto(with: photoSettings, delegate: self)
+        } else if let photoOutput = self._photoOutput as? AVCaptureStillImageOutput, let connection = photoOutput.connection(withMediaType: AVMediaTypeVideo) {
+            self.executeClosureAsyncOnMainQueueIfNecessary {
+                self.photoDelegate?.nextLevel(self, willCapturePhotoWithConfiguration: self.photoConfiguration)
+
+                self.executeClosureAsyncOnSessionQueueIfNecessary {
+                    photoOutput.captureStillImageAsynchronously(from: connection, completionHandler: { buffer, error in
+                        self.processPhotoCapture(from: photoOutput, photoSampleBuffer: buffer, previewPhotoSampleBuffer: nil)
+
+                        self.executeClosureAsyncOnMainQueueIfNecessary {
+                            self.photoDelegate?.nextLevel(self, didCapturePhotoWithConfiguration: self.photoConfiguration)
+                        }
+                    })
+                }
             }
         }
     }
-    
+
+    internal func processPhotoCapture(from captureOutput: AVCaptureOutput, photoSampleBuffer: CMSampleBuffer?, previewPhotoSampleBuffer: CMSampleBuffer?) {
+        if let sampleBuffer = photoSampleBuffer {
+
+            // output dictionary
+            var photoDict: [String: Any] = [:]
+
+            let tiffMetadataAdditions = NextLevel.tiffMetadata()
+
+            // append tiff metadata to buffer for proagation
+            if let tiffDict: CFDictionary = CMCopyDictionaryOfAttachments(kCFAllocatorDefault, kCGImagePropertyTIFFDictionary, kCMAttachmentMode_ShouldPropagate) {
+                let tiffNSDict = tiffDict as NSDictionary
+                var metaDict: [String: Any] = [:]
+                for (key, value) in tiffMetadataAdditions {
+                    metaDict.updateValue(value as AnyObject, forKey: key)
+                }
+                for (key, value) in tiffNSDict {
+                    let keyString = key as! String
+                    metaDict.updateValue(value as AnyObject, forKey: keyString)
+                }
+                CMSetAttachment(sampleBuffer, kCGImagePropertyTIFFDictionary, metaDict as CFTypeRef?, kCMAttachmentMode_ShouldPropagate)
+            } else {
+                CMSetAttachment(sampleBuffer, kCGImagePropertyTIFFDictionary, tiffMetadataAdditions as CFTypeRef?, kCMAttachmentMode_ShouldPropagate)
+            }
+
+            // add exif metadata
+            if let metadata = NextLevel.metadataFromSampleBuffer(sampleBuffer: sampleBuffer) {
+                photoDict[NextLevelPhotoMetadataKey] = metadata
+            }
+
+            // add JPEG, thumbnail
+            let imageData = { () -> Data? in
+                if #available(iOS 10.0, *) {
+                    return AVCapturePhotoOutput.jpegPhotoDataRepresentation(forJPEGSampleBuffer: sampleBuffer, previewPhotoSampleBuffer: previewPhotoSampleBuffer)
+                } else {
+                    return AVCaptureStillImageOutput.jpegStillImageNSDataRepresentation(sampleBuffer)
+                }
+            }()
+
+            if let data = imageData {
+                photoDict[NextLevelPhotoJPEGKey] = data
+            }
+
+            // add explicit thumbnail
+            //let thumbnailData = AVCapturePhotoOutput.jpegPhotoDataRepresentation(forJPEGSampleBuffer: previewBuffer, previewPhotoSampleBuffer: nil)
+            //if let tData = thumbnailData {
+            //    photoDict[NextLevelPhotoThumbnailKey] = tData
+            //}
+
+            self.executeClosureAsyncOnMainQueueIfNecessary {
+                self.photoDelegate?.nextLevel(self, didProcessPhotoCaptureWith: photoDict, photoConfiguration: self.photoConfiguration)
+            }
+        }
+    }
+
 }
 
 // MARK: - NextLevelSession and sample buffer processing
@@ -2211,6 +2299,7 @@ extension NextLevel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudi
 
 // MARK: - AVCapturePhotoCaptureDelegate
 
+@available(iOS 10, *)
 extension NextLevel: AVCapturePhotoCaptureDelegate {
     
     public func capture(_ captureOutput: AVCapturePhotoOutput, willCapturePhotoForResolvedSettings resolvedSettings: AVCaptureResolvedPhotoSettings) {
@@ -2226,50 +2315,7 @@ extension NextLevel: AVCapturePhotoCaptureDelegate {
     }
     
     public func capture(_ captureOutput: AVCapturePhotoOutput, didFinishProcessingPhotoSampleBuffer photoSampleBuffer: CMSampleBuffer?, previewPhotoSampleBuffer: CMSampleBuffer?, resolvedSettings: AVCaptureResolvedPhotoSettings, bracketSettings: AVCaptureBracketedStillImageSettings?, error: Error?) {
-        if let sampleBuffer = photoSampleBuffer {
-            
-            // output dictionary
-            var photoDict: [String: Any] = [:]
-
-            let tiffMetadataAdditions = NextLevel.tiffMetadata()
-
-            // append tiff metadata to buffer for proagation
-            if let tiffDict: CFDictionary = CMCopyDictionaryOfAttachments(kCFAllocatorDefault, kCGImagePropertyTIFFDictionary, kCMAttachmentMode_ShouldPropagate) {
-                let tiffNSDict = tiffDict as NSDictionary
-                var metaDict: [String: Any] = [:]
-                for (key, value) in tiffMetadataAdditions {
-                    metaDict.updateValue(value as AnyObject, forKey: key)
-                }
-                for (key, value) in tiffNSDict {
-                    let keyString = key as! String
-                    metaDict.updateValue(value as AnyObject, forKey: keyString)
-                }
-                CMSetAttachment(sampleBuffer, kCGImagePropertyTIFFDictionary, metaDict as CFTypeRef?, kCMAttachmentMode_ShouldPropagate)
-            } else {
-                CMSetAttachment(sampleBuffer, kCGImagePropertyTIFFDictionary, tiffMetadataAdditions as CFTypeRef?, kCMAttachmentMode_ShouldPropagate)
-            }
-            
-            // add exif metadata
-            if let metadata = NextLevel.metadataFromSampleBuffer(sampleBuffer: sampleBuffer) {
-                photoDict[NextLevelPhotoMetadataKey] = metadata
-            }
-            
-            // add JPEG, thumbnail
-            let imageData = AVCapturePhotoOutput.jpegPhotoDataRepresentation(forJPEGSampleBuffer: sampleBuffer, previewPhotoSampleBuffer: previewPhotoSampleBuffer)
-            if let data = imageData {
-                photoDict[NextLevelPhotoJPEGKey] = data
-            }
-
-            // add explicit thumbnail
-            //let thumbnailData = AVCapturePhotoOutput.jpegPhotoDataRepresentation(forJPEGSampleBuffer: previewBuffer, previewPhotoSampleBuffer: nil)
-            //if let tData = thumbnailData {
-            //    photoDict[NextLevelPhotoThumbnailKey] = tData
-            //}
-            
-            self.executeClosureAsyncOnMainQueueIfNecessary {
-                self.photoDelegate?.nextLevel(self, didProcessPhotoCaptureWith: photoDict, photoConfiguration: self.photoConfiguration)
-            }
-        }
+        self.processPhotoCapture(from: captureOutput, photoSampleBuffer: photoSampleBuffer, previewPhotoSampleBuffer: previewPhotoSampleBuffer)
     }
     
     public func capture(_ captureOutput: AVCapturePhotoOutput, didFinishProcessingRawPhotoSampleBuffer rawSampleBuffer: CMSampleBuffer?, previewPhotoSampleBuffer: CMSampleBuffer?, resolvedSettings: AVCaptureResolvedPhotoSettings, bracketSettings: AVCaptureBracketedStillImageSettings?, error: Error?) {
@@ -2325,7 +2371,6 @@ extension NextLevel: AVCapturePhotoCaptureDelegate {
             self.photoDelegate?.nextLevelDidCompletePhotoCapture(self)
         }
     }
-    
 }
 
 // MARK: - queues

@@ -1204,6 +1204,7 @@ extension NextLevel {
                                 }
                             } else if device.isFlashModeSupported(newValue.avfoundationType) {
                                 self.photoConfiguration.flashMode = newValue.avfoundationType
+                                device.flashMode = newValue.avfoundationType
                             }
                         }
                     }

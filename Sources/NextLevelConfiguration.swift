@@ -39,7 +39,7 @@ public class NextLevelConfiguration: NSObject {
     // object lifecycle
     
     override init() {
-        self.preset = AVCaptureSessionPresetHigh
+        self.preset = AVCaptureSessionPresetPhoto
         self.options = nil
         super.init()
     }

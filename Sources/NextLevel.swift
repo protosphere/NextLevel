@@ -1210,31 +1210,29 @@ extension NextLevel {
     
     public var flashMode: NextLevelFlashMode {
         get {
-            return self.photoConfiguration.flashMode.flashModeNextLevelType()
+            return self.photoConfiguration.flashMode
         }
         set {
             if let device: AVCaptureDevice = self._currentDevice {
                 guard
                     device.hasFlash
                 else {
-                    return
+                        return
                 }
-                
+
                 do {
                     try device.lockForConfiguration()
 
-                    if let output = self._photoOutput {
-                        if self.photoConfiguration.flashMode != newValue.avfoundationType {
-                            if #available(iOS 10, *), let output = output as? AVCapturePhotoOutput {
-                                let modes = output.supportedFlashModes
-                                let numberMode: NSNumber = NSNumber(integerLiteral: Int(newValue.avfoundationType.rawValue))
-                                if modes.contains(numberMode) {
-                                    self.photoConfiguration.flashMode = newValue.avfoundationType
-                                }
-                            } else if device.isFlashModeSupported(newValue.avfoundationType) {
-                                self.photoConfiguration.flashMode = newValue.avfoundationType
-                                device.flashMode = newValue.avfoundationType
+                    if #available(iOS 10, *), let output = self._photoOutput as? AVCapturePhotoOutput {
+                        if self.photoConfiguration.flashMode != newValue {
+                            let modes = output.supportedFlashModes
+                            let numberMode: NSNumber = NSNumber(integerLiteral: Int(newValue.avfoundationType.rawValue))
+                            if modes.contains(numberMode) {
+                                self.photoConfiguration.flashMode = newValue
                             }
+                        } else if device.isFlashModeSupported(newValue.avfoundationType) {
+                            self.photoConfiguration.flashMode = newValue
+                            device.flashMode = newValue.avfoundationType
                         }
                     }
 

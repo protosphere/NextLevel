@@ -39,7 +39,7 @@ public class NextLevelConfiguration: NSObject {
     // object lifecycle
     
     override init() {
-        self.preset = AVCaptureSessionPresetHigh
+        self.preset = AVCaptureSessionPresetPhoto
         self.options = nil
         super.init()
     }
@@ -214,7 +214,15 @@ public class NextLevelPhotoConfiguration : NextLevelConfiguration {
     // MARK: funcs
 
     @available(iOS 10, *)
-    public func avcaptureDictionary() -> [String: Any]? {
+    public func avPhotoSettings() -> AVCapturePhotoSettings {
+        let photoSettings = AVCapturePhotoSettings(format: self.avCaptureDictionary())
+        photoSettings.flashMode = self.flashMode.avfoundationType
+
+        return photoSettings
+    }
+
+    @available(iOS 10, *)
+    private func avCaptureDictionary() -> [String: Any]? {
         if let options = self.options {
             return options
         } else {
@@ -228,8 +236,7 @@ public class NextLevelPhotoConfiguration : NextLevelConfiguration {
             return config
         }
     }
-    
-    // change flashMode with NextLevel.flashMode
-    internal var flashMode: AVCaptureFlashMode
+
+    internal var flashMode: NextLevelFlashMode
 }
 

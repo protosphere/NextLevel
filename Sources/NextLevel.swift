@@ -557,6 +557,10 @@ public class NextLevel: NSObject {
 
     public var cameraMode: NextLevelCaptureMode {
         didSet {
+            guard self.cameraMode != oldValue else {
+                return
+            }
+
             self.configureSession()
             self.configureSessionDevices()
         }
@@ -712,7 +716,7 @@ public class NextLevel: NSObject {
         if let session = self._captureSession {
             self.beginConfiguration()
             self.removeInputs(session: session)
-            self.removeOutputsIfNecessary(session: session)
+            self.removeOutputs(session: session)
             self.commitConfiguration()
         }
 
@@ -822,12 +826,12 @@ extension NextLevel {
 
                 self.beginConfiguration()
                 self.removeInputs(session: session)
-                self.removeOutputsIfNecessary(session: session)
+                self.removeOutputs(session: session)
                 self.commitConfiguration()
                 
                 self._recordingSession = nil
                 self._captureSession = nil
-            
+                self._currentDevice = nil
             }
         }
     }
@@ -931,7 +935,7 @@ extension NextLevel {
         
             // setup preset and mode
             
-            self.removeOutputsIfNecessary(session: session)
+            self.removeUnusedOutputsForCurrentCameraMode(session: session)
             
             switch self.cameraMode {
             case .video:
@@ -1116,35 +1120,60 @@ extension NextLevel {
                 return true
             }
         }
-
-        print("NextLevel, couldn't add audio output to session")
+        print("NextLevel, couldn't add photo output to session")
         return false
     }
 
-    internal func removeOutputsIfNecessary(session: AVCaptureSession) {
-        
+    internal func removeOutputs(session: AVCaptureSession) {
+        guard let outputs = session.outputs as? [AVCaptureOutput] else {
+            return
+        }
+
+        for output in outputs {
+            session.removeOutput(output)
+        }
+
+        self._videoOutput = nil
+        self._audioInput = nil
+        self._photoOutput = nil
+    }
+
+    internal func removeUnusedOutputsForCurrentCameraMode(session: AVCaptureSession) {
+        guard let currentOutputs = session.outputs as? [AVCaptureOutput] else {
+            return
+        }
+
         switch self.cameraMode {
         case .video:
+            if let photoOutput = self._photoOutput, currentOutputs.contains(photoOutput) {
+                session.removeOutput(photoOutput)
+                self._photoOutput = nil
+            }
+
             break
         case .photo:
-            if let audioOutput = self._audioOutput {
-                if session.outputs.contains(where: { (audioOutput) -> Bool in
-                    return true
-                }) {
-                    session.removeOutput(audioOutput)
-                    self._audioOutput = nil
-                }
+            if let videoOutput = self._videoOutput, currentOutputs.contains(videoOutput) {
+                session.removeOutput(videoOutput)
+                self._videoOutput = nil
             }
+
+            if let audioOutput = self._audioOutput, currentOutputs.contains(audioOutput) {
+                session.removeOutput(audioOutput)
+                self._audioOutput = nil
+            }
+
             break
         case .audio:
-            if let videoOutput = self._videoOutput {
-                if session.outputs.contains(where: { (videoOutput) -> Bool in
-                    return true
-                }) {
-                    session.removeOutput(videoOutput)
-                    self._videoOutput = nil
-                }
+            if let videoOutput = self._videoOutput, currentOutputs.contains(videoOutput) {
+                session.removeOutput(videoOutput)
+                self._videoOutput = nil
             }
+
+            if let photoOutput = self._photoOutput, currentOutputs.contains(photoOutput) {
+                session.removeOutput(photoOutput)
+                self._photoOutput = nil
+            }
+
             break
         }
         

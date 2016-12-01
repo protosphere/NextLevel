@@ -224,23 +224,3 @@ extension AVCaptureVideoOrientation {
     }
     
 }
-
-extension AVCaptureFlashMode {
-    
-    internal func flashModeNextLevelType() -> NextLevelFlashMode {
-        var mode = NextLevelFlashMode.off
-        switch self {
-        case .auto:
-            mode = .auto
-            break
-        case .off:
-            mode = .off
-            break
-        case .on:
-            mode = .on
-            break
-        }
-        return mode
-    }
-    
-}

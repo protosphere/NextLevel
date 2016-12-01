@@ -1177,29 +1177,29 @@ extension NextLevel {
     
     public var flashMode: NextLevelFlashMode {
         get {
-            return self.photoConfiguration.flashMode.flashModeNextLevelType()
+            return self.photoConfiguration.flashMode
         }
         set {
             if let device: AVCaptureDevice = self._currentDevice {
                 guard
                     device.hasFlash
                 else {
-                    return
+                        return
                 }
-                
+
                 do {
                     try device.lockForConfiguration()
-                    
+
                     if let output = self._photoOutput {
-                        if self.photoConfiguration.flashMode != newValue.avfoundationType {
+                        if self.photoConfiguration.flashMode != newValue {
                             let modes = output.supportedFlashModes
                             let numberMode: NSNumber = NSNumber(integerLiteral: Int(newValue.avfoundationType.rawValue))
                             if modes.contains(numberMode) {
-                                self.photoConfiguration.flashMode = newValue.avfoundationType
+                                self.photoConfiguration.flashMode = newValue
                             }
                         }
                     }
-                        
+
                     device.unlockForConfiguration()
                 }
                 catch {

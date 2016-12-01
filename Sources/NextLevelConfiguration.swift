@@ -212,8 +212,15 @@ public class NextLevelPhotoConfiguration : NextLevelConfiguration {
     }
     
     // MARK: funcs
-        
-    public func avcaptureDictionary() -> [String: Any]? {
+
+    public func avPhotoSettings() -> AVCapturePhotoSettings {
+        let photoSettings = AVCapturePhotoSettings(format: self.avCaptureDictionary())
+        photoSettings.flashMode = self.flashMode.avfoundationType
+
+        return photoSettings
+    }
+
+    private func avCaptureDictionary() -> [String: Any]? {
         if let options = self.options {
             return options
         } else {
@@ -227,8 +234,7 @@ public class NextLevelPhotoConfiguration : NextLevelConfiguration {
             return config
         }
     }
-    
-    // change flashMode with NextLevel.flashMode
-    internal var flashMode: AVCaptureFlashMode
+
+    internal var flashMode: NextLevelFlashMode
 }
 

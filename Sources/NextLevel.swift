@@ -2049,11 +2049,9 @@ extension NextLevel {
     
     public func capturePhoto() {
         if #available(iOS 10, *), let photoOutput = self._photoOutput as? AVCapturePhotoOutput,
-            let formatDictionary = self.photoConfiguration.avcaptureDictionary(),
             photoOutput.connection(withMediaType: AVMediaTypeVideo) != nil {
 
-            let photoSettings = AVCapturePhotoSettings(format: formatDictionary)
-            photoOutput.capturePhoto(with: photoSettings, delegate: self)
+            photoOutput.capturePhoto(with: self.photoConfiguration.avPhotoSettings(), delegate: self)
         } else if let photoOutput = self._photoOutput as? AVCaptureStillImageOutput, let connection = photoOutput.connection(withMediaType: AVMediaTypeVideo) {
             self.executeClosureAsyncOnMainQueueIfNecessary {
                 self.photoDelegate?.nextLevel(self, willCapturePhotoWithConfiguration: self.photoConfiguration)
